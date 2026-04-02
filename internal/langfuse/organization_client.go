@@ -15,9 +15,15 @@ type Project struct {
 }
 
 type ProjectApiKey struct {
-	ID        string `json:"id"`
-	PublicKey string `json:"publicKey"`
-	SecretKey string `json:"secretKey"`
+	ID        string  `json:"id"`
+	PublicKey string  `json:"publicKey"`
+	SecretKey string  `json:"secretKey"`
+	Note      *string `json:"note"`
+}
+
+// CreateProjectApiKeyRequest is the JSON body for POST /api/public/projects/{projectId}/apiKeys.
+type CreateProjectApiKeyRequest struct {
+	Note *string `json:"note,omitempty"`
 }
 
 type MetaResponse struct {
@@ -139,7 +145,7 @@ type OrganizationClient interface {
 	UpdateProject(ctx context.Context, projectID string, request *UpdateProjectRequest) (*Project, error)
 	DeleteProject(ctx context.Context, projectID string) error
 	GetProjectApiKey(ctx context.Context, projectID string, apiKeyID string) (*ProjectApiKey, error)
-	CreateProjectApiKey(ctx context.Context, projectID string) (*ProjectApiKey, error)
+	CreateProjectApiKey(ctx context.Context, projectID string, request *CreateProjectApiKeyRequest) (*ProjectApiKey, error)
 	DeleteProjectApiKey(ctx context.Context, projectID string, apiKeyID string) error
 	ListLlmConnections(ctx context.Context, page, limit int) (*PaginatedLlmConnections, error)
 	UpsertLlmConnection(ctx context.Context, request *UpsertLlmConnectionRequest) (*LlmConnection, error)
@@ -263,8 +269,12 @@ func (c *organizationClientImpl) GetProjectApiKey(ctx context.Context, projectID
 	return nil, fmt.Errorf("cannot find API key with ID %s in project %s", apiKeyID, projectID)
 }
 
-func (c *organizationClientImpl) CreateProjectApiKey(ctx context.Context, projectID string) (*ProjectApiKey, error) {
-	resp, err := c.makeRequest(ctx, http.MethodPost, fmt.Sprintf("api/public/projects/%s/apiKeys", projectID), nil)
+func (c *organizationClientImpl) CreateProjectApiKey(ctx context.Context, projectID string, request *CreateProjectApiKeyRequest) (*ProjectApiKey, error) {
+	var body any = struct{}{}
+	if request != nil {
+		body = request
+	}
+	resp, err := c.makeRequest(ctx, http.MethodPost, fmt.Sprintf("api/public/projects/%s/apiKeys", projectID), body)
 	if err != nil {
 		return nil, err
 	}
