@@ -388,8 +388,8 @@ func TestUserDataSourceRead_ByEmail(t *testing.T) {
 	if model.UserName.ValueString() != userEmail {
 		t.Fatalf("unexpected user_name. got %q, want %q", model.UserName.ValueString(), userEmail)
 	}
-	if model.Active.ValueBool() {
-		t.Fatalf("expected active=false")
+	if !model.Active.ValueBool() {
+		t.Fatalf("expected active=true (SCIM API omits active; data source defaults to true)")
 	}
 }
 

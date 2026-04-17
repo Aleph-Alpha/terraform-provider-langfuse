@@ -96,11 +96,10 @@ func TestAccLangfuseWorkflow(t *testing.T) {
 					resource.TestCheckResourceAttr("langfuse_project_api_key.test", "note", "acceptance-workflow"),
 				),
 			},
-			// Step 5: Plan-only — org/project identity must stay known; API keys must not be replaced
-			// when only org metadata and project fields change (regression for computed-id unknown churn).
+			// Step 5: Apply metadata/name updates and verify that org/project IDs remain known
+			// and API keys are not replaced (regression for computed-id unknown churn).
 			{
-				Config:   testAccLangfuseWorkflowConfig_Step5(orgName, projectName+"updated"),
-				PlanOnly: true,
+				Config: testAccLangfuseWorkflowConfig_Step5(orgName, projectName+"updated"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectKnownValue("langfuse_organization.test", tfjsonpath.New("id"), knownvalue.NotNull()),
@@ -565,6 +564,7 @@ resource "langfuse_organization_api_key" "note_test" {
 
 resource "langfuse_project" "note_test" {
   name                     = "%s"
+  retention_days           = 0
   organization_id          = langfuse_organization.note_test.id
   organization_public_key  = langfuse_organization_api_key.note_test.public_key
   organization_private_key = langfuse_organization_api_key.note_test.secret_key

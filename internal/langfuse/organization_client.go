@@ -103,7 +103,8 @@ type OrganizationMembership struct {
 }
 
 type SCIMUserRequest struct {
-	UserName string `json:"userName"`
+	Schemas  []string `json:"schemas"`
+	UserName string   `json:"userName"`
 	Emails   []struct {
 		Value   string `json:"value"`
 		Primary bool   `json:"primary"`
@@ -149,7 +150,7 @@ type ProjectMembership struct {
 }
 
 type listProjectMembershipsResponse struct {
-	Members []ProjectMembership `json:"members"`
+	Memberships []ProjectMembership `json:"memberships"`
 }
 
 type UpsertProjectMemberRequest struct {
@@ -188,7 +189,6 @@ type OrganizationClient interface {
 	UpdateSCIMUser(ctx context.Context, userID string, request *SCIMUserRequest) (*SCIMUserResponse, error)
 	DeleteSCIMUser(ctx context.Context, userID string) error
 	GetSCIMUser(ctx context.Context, userID string) (*SCIMUserResponse, error)
-	FindSCIMUserByEmail(ctx context.Context, email string) (*SCIMUserResponse, error)
 }
 
 type organizationClientImpl struct {
@@ -533,7 +533,7 @@ func (c *organizationClientImpl) FindSCIMUserByEmail(ctx context.Context, email 
 }
 
 func (c *organizationClientImpl) ListProjectMemberships(ctx context.Context, projectID string) ([]ProjectMembership, error) {
-	resp, err := c.makeRequest(ctx, http.MethodGet, fmt.Sprintf("api/public/projects/%s/members", projectID), nil)
+	resp, err := c.makeRequest(ctx, http.MethodGet, fmt.Sprintf("api/public/projects/%s/memberships", projectID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +543,7 @@ func (c *organizationClientImpl) ListProjectMemberships(ctx context.Context, pro
 		return nil, err
 	}
 
-	return listResp.Members, nil
+	return listResp.Memberships, nil
 }
 
 func (c *organizationClientImpl) GetProjectMembership(ctx context.Context, projectID string, userID string) (*ProjectMembership, error) {
@@ -562,7 +562,7 @@ func (c *organizationClientImpl) GetProjectMembership(ctx context.Context, proje
 }
 
 func (c *organizationClientImpl) UpsertProjectMembership(ctx context.Context, projectID string, request *UpsertProjectMemberRequest) (*ProjectMembership, error) {
-	resp, err := c.makeRequest(ctx, http.MethodPut, fmt.Sprintf("api/public/projects/%s/members", projectID), request)
+	resp, err := c.makeRequest(ctx, http.MethodPut, fmt.Sprintf("api/public/projects/%s/memberships", projectID), request)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +582,7 @@ func (c *organizationClientImpl) RemoveProjectMember(ctx context.Context, projec
 		UserID: userID,
 	}
 
-	resp, err := c.makeRequest(ctx, http.MethodDelete, fmt.Sprintf("api/public/projects/%s/members", projectID), deleteRequest)
+	resp, err := c.makeRequest(ctx, http.MethodDelete, fmt.Sprintf("api/public/projects/%s/memberships", projectID), deleteRequest)
 	if err != nil {
 		return err
 	}
@@ -590,10 +590,6 @@ func (c *organizationClientImpl) RemoveProjectMember(ctx context.Context, projec
 	var removeResp removeProjectMemberResponse
 	if err := decodeResponse(resp, &removeResp); err != nil {
 		return err
-	}
-
-	if !removeResp.Success {
-		return fmt.Errorf("failed to remove member %s from project %s: %s", userID, projectID, removeResp.Message)
 	}
 
 	return nil

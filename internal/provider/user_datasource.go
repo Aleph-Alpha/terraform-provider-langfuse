@@ -94,8 +94,15 @@ func (d *userDataSource) ValidateConfig(ctx context.Context, req datasource.Vali
 		return
 	}
 
-	idSet := !data.ID.IsNull() && !data.ID.IsUnknown()
-	emailSet := !data.Email.IsNull() && !data.Email.IsUnknown()
+	// If either attribute is unknown (e.g. references a computed value from
+	// another resource that hasn't been applied yet), defer validation — the
+	// Read function will handle the actual check once values are resolved.
+	if data.ID.IsUnknown() || data.Email.IsUnknown() {
+		return
+	}
+
+	idSet := !data.ID.IsNull()
+	emailSet := !data.Email.IsNull()
 
 	if !idSet && !emailSet {
 		resp.Diagnostics.AddError(
@@ -152,11 +159,14 @@ func (d *userDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		email = user.Emails[0].Value
 	}
 
+	// The Langfuse SCIM API omits the "active" field from all read responses,
+	// which would zero-value it to false. Default to true since all created
+	// users are active and the API does not expose deactivation status.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &userDataSourceModel{
 		ID:                     types.StringValue(user.ID),
 		Email:                  types.StringValue(email),
 		UserName:               types.StringValue(user.UserName),
-		Active:                 types.BoolValue(user.Active),
+		Active:                 types.BoolValue(true),
 		OrganizationPublicKey:  data.OrganizationPublicKey,
 		OrganizationPrivateKey: data.OrganizationPrivateKey,
 	})...)

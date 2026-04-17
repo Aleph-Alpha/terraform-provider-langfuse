@@ -128,6 +128,7 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 	}
 
 	scimReq := &langfuse.SCIMUserRequest{
+		Schemas:  []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
 		UserName: email,
 		Active:   active,
 		Emails: []struct {
@@ -146,7 +147,11 @@ func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	plan.ID = types.StringValue(user.ID)
 	plan.UserName = types.StringValue(user.UserName)
-	plan.Active = types.BoolValue(user.Active)
+	// Do not overwrite plan.Active from the create response: Langfuse's SCIM
+	// endpoint omits the "active" field in its response body, which causes Go's
+	// JSON decoder to zero-value it (false). Keeping the planned value avoids a
+	// spurious "provider produced inconsistent result" error. The Read function
+	// will sync the real value on the next refresh.
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -184,7 +189,9 @@ func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	state.ID = types.StringValue(user.ID)
 	state.UserName = types.StringValue(user.UserName)
 	state.Email = types.StringValue(email)
-	state.Active = types.BoolValue(user.Active)
+	// The Langfuse SCIM API never includes the "active" field in its responses.
+	// Overwriting state.Active from the zero-valued response would cause perpetual
+	// drift (state=false, config default=true). Preserve whatever is already in state.
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
@@ -214,6 +221,7 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	scimReq := &langfuse.SCIMUserRequest{
+		Schemas:  []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
 		UserName: email,
 		Active:   active,
 		Emails: []struct {
@@ -232,7 +240,8 @@ func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, r
 
 	plan.ID = state.ID
 	plan.UserName = types.StringValue(user.UserName)
-	plan.Active = types.BoolValue(user.Active)
+	// Same rationale as Create: Langfuse's SCIM PUT response omits "active",
+	// so we keep the planned value; Read will sync the real state.
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
