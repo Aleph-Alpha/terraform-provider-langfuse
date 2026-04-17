@@ -16,9 +16,15 @@ type Project struct {
 }
 
 type ProjectApiKey struct {
-	ID        string `json:"id"`
-	PublicKey string `json:"publicKey"`
-	SecretKey string `json:"secretKey"`
+	ID        string  `json:"id"`
+	PublicKey string  `json:"publicKey"`
+	SecretKey string  `json:"secretKey"`
+	Note      *string `json:"note"`
+}
+
+// CreateProjectApiKeyRequest is the JSON body for POST /api/public/projects/{projectId}/apiKeys.
+type CreateProjectApiKeyRequest struct {
+	Note *string `json:"note,omitempty"`
 }
 
 type MetaResponse struct {
@@ -165,7 +171,7 @@ type OrganizationClient interface {
 	UpdateProject(ctx context.Context, projectID string, request *UpdateProjectRequest) (*Project, error)
 	DeleteProject(ctx context.Context, projectID string) error
 	GetProjectApiKey(ctx context.Context, projectID string, apiKeyID string) (*ProjectApiKey, error)
-	CreateProjectApiKey(ctx context.Context, projectID string) (*ProjectApiKey, error)
+	CreateProjectApiKey(ctx context.Context, projectID string, request *CreateProjectApiKeyRequest) (*ProjectApiKey, error)
 	DeleteProjectApiKey(ctx context.Context, projectID string, apiKeyID string) error
 	ListLlmConnections(ctx context.Context, page, limit int) (*PaginatedLlmConnections, error)
 	UpsertLlmConnection(ctx context.Context, request *UpsertLlmConnectionRequest) (*LlmConnection, error)
@@ -174,12 +180,15 @@ type OrganizationClient interface {
 	UpdateMembership(ctx context.Context, membershipID string, request *UpdateMembershipRequest) (*OrganizationMembership, error)
 	RemoveMember(ctx context.Context, membershipID string) error
 	CreateSCIMUser(ctx context.Context, request *SCIMUserRequest) (*SCIMUserResponse, error)
-	GetSCIMUser(ctx context.Context, userID string) (*SCIMUserResponse, error)
 	FindSCIMUserByEmail(ctx context.Context, email string) (*SCIMUserResponse, error)
 	ListProjectMemberships(ctx context.Context, projectID string) ([]ProjectMembership, error)
 	GetProjectMembership(ctx context.Context, projectID string, userID string) (*ProjectMembership, error)
 	UpsertProjectMembership(ctx context.Context, projectID string, request *UpsertProjectMemberRequest) (*ProjectMembership, error)
 	RemoveProjectMember(ctx context.Context, projectID string, userID string) error
+	UpdateSCIMUser(ctx context.Context, userID string, request *SCIMUserRequest) (*SCIMUserResponse, error)
+	DeleteSCIMUser(ctx context.Context, userID string) error
+	GetSCIMUser(ctx context.Context, userID string) (*SCIMUserResponse, error)
+	FindSCIMUserByEmail(ctx context.Context, email string) (*SCIMUserResponse, error)
 }
 
 type organizationClientImpl struct {
@@ -295,8 +304,12 @@ func (c *organizationClientImpl) GetProjectApiKey(ctx context.Context, projectID
 	return nil, fmt.Errorf("cannot find API key with ID %s in project %s", apiKeyID, projectID)
 }
 
-func (c *organizationClientImpl) CreateProjectApiKey(ctx context.Context, projectID string) (*ProjectApiKey, error) {
-	resp, err := c.makeRequest(ctx, http.MethodPost, fmt.Sprintf("api/public/projects/%s/apiKeys", projectID), nil)
+func (c *organizationClientImpl) CreateProjectApiKey(ctx context.Context, projectID string, request *CreateProjectApiKeyRequest) (*ProjectApiKey, error) {
+	var body any = struct{}{}
+	if request != nil {
+		body = request
+	}
+	resp, err := c.makeRequest(ctx, http.MethodPost, fmt.Sprintf("api/public/projects/%s/apiKeys", projectID), body)
 	if err != nil {
 		return nil, err
 	}
@@ -452,6 +465,33 @@ func (c *organizationClientImpl) RemoveMember(ctx context.Context, membershipID 
 	// API returns success: false but with a success message, so we check the message too
 	if !removeMemberResp.Success && !strings.Contains(strings.ToLower(removeMemberResp.Message), "deleted") && !strings.Contains(strings.ToLower(removeMemberResp.Message), "removed") {
 		return fmt.Errorf("failed to remove member with ID %s: %s", membershipID, removeMemberResp.Message)
+	}
+
+	return nil
+}
+
+func (c *organizationClientImpl) UpdateSCIMUser(ctx context.Context, userID string, request *SCIMUserRequest) (*SCIMUserResponse, error) {
+	resp, err := c.makeRequest(ctx, http.MethodPut, fmt.Sprintf("api/public/scim/Users/%s", userID), request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update SCIM user: %w", err)
+	}
+
+	var user SCIMUserResponse
+	if err := decodeResponse(resp, &user); err != nil {
+		return nil, fmt.Errorf("failed to decode SCIM user response: %w", err)
+	}
+
+	return &user, nil
+}
+
+func (c *organizationClientImpl) DeleteSCIMUser(ctx context.Context, userID string) error {
+	resp, err := c.makeRequest(ctx, http.MethodDelete, fmt.Sprintf("api/public/scim/Users/%s", userID), nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete SCIM user: %w", err)
+	}
+
+	if err := decodeResponse(resp, nil); err != nil {
+		return fmt.Errorf("failed to delete SCIM user: %w", err)
 	}
 
 	return nil
