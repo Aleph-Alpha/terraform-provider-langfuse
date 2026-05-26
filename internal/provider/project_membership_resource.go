@@ -108,7 +108,7 @@ func (r *projectMembershipResource) Schema(ctx context.Context, req resource.Sch
 			},
 			"ignore_destroy": schema.BoolAttribute{
 				Optional:    true,
-				Description: "When true, the project membership will not be removed when the resource is destroyed. Defaults to false.",
+				Description: "**Experimental:** When true, the project membership will not be removed when the resource is destroyed. Defaults to false. This setting is experimental and its behavior may change in future releases.",
 			},
 		},
 	}

@@ -64,7 +64,7 @@ func (r *organizationResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"ignore_destroy": schema.BoolAttribute{
 				Optional:    true,
-				Description: "When true, the resource will not be deleted in Langfuse when destroyed via Terraform. Defaults to false.",
+				Description: "**Experimental:** When true, the resource will not be deleted in Langfuse when destroyed via Terraform. Defaults to false. This setting is experimental and its behavior may change in future releases.",
 			},
 		},
 	}

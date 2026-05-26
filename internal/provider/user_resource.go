@@ -103,7 +103,7 @@ func (r *userResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 			},
 			"ignore_destroy": schema.BoolAttribute{
 				Optional:    true,
-				Description: "When true, the user will not be deleted from Langfuse when the resource is destroyed. Defaults to false.",
+				Description: "**Experimental:** When true, the user will not be deleted from Langfuse when the resource is destroyed. Defaults to false. This setting is experimental and its behavior may change in future releases.",
 			},
 		},
 	}
