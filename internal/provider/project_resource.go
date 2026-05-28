@@ -2,6 +2,9 @@ package provider
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -118,14 +121,27 @@ func (r *projectResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	organizationClient := r.ClientFactory.NewOrganizationClient(data.OrganizationPublicKey.ValueString(), data.OrganizationPrivateKey.ValueString())
-	project, err := organizationClient.CreateProject(ctx, &langfuse.CreateProjectRequest{
+	createReq := &langfuse.CreateProjectRequest{
 		Name:          data.Name.ValueString(),
 		RetentionDays: data.RetentionDays.ValueInt32(),
 		Metadata:      metadata,
-	})
+	}
+	project, err := organizationClient.CreateProject(ctx, createReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating project", err.Error())
-		return
+		// If a project with this name already exists, adopt it instead of failing.
+		// This lets Terraform take over management of projects that were created
+		// out-of-band or by a previous, lost state.
+		var apiErr *langfuse.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
+			project, err = adoptExistingProject(ctx, organizationClient, createReq)
+			if err != nil {
+				resp.Diagnostics.AddError("Error adopting existing project", err.Error())
+				return
+			}
+		} else {
+			resp.Diagnostics.AddError("Error creating project", err.Error())
+			return
+		}
 	}
 
 	var metadataMap types.Map
@@ -150,6 +166,38 @@ func (r *projectResource) Create(ctx context.Context, req resource.CreateRequest
 		OrganizationPrivateKey: types.StringValue(data.OrganizationPrivateKey.ValueString()),
 		IgnoreDestroy:          data.IgnoreDestroy,
 	})...)
+}
+
+// adoptExistingProject is called when CreateProject returns 409 Conflict. It
+// locates the existing project by name and updates it to match the desired
+// retention/metadata so the resulting state matches what the user requested.
+func adoptExistingProject(ctx context.Context, client langfuse.OrganizationClient, req *langfuse.CreateProjectRequest) (*langfuse.Project, error) {
+	projects, err := client.ListProjects(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list projects while adopting existing project %q: %w", req.Name, err)
+	}
+
+	var existing *langfuse.Project
+	for _, p := range projects {
+		if p.Name == req.Name {
+			existing = p
+			break
+		}
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("project %q reported as existing but was not found in the organization", req.Name)
+	}
+
+	updated, err := client.UpdateProject(ctx, existing.ID, &langfuse.UpdateProjectRequest{
+		Name:          req.Name,
+		RetentionDays: req.RetentionDays,
+		Metadata:      req.Metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update existing project %q (%s): %w", req.Name, existing.ID, err)
+	}
+
+	return updated, nil
 }
 
 func (r *projectResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
