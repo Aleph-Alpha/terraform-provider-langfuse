@@ -28,12 +28,24 @@ func buildBaseRequest(ctx context.Context, method, url string, body any) (*http.
 	return req, nil
 }
 
+// APIError is returned by decodeResponse when the Langfuse API responds with a
+// non-2xx status code. Callers can use errors.As to inspect StatusCode and
+// branch on specific failure modes (e.g. 409 Conflict).
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("request failed with status code %d, response body: %s", e.StatusCode, e.Body)
+}
+
 func decodeResponse(resp *http.Response, target any) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("request failed with status code %d, response body: %s", resp.StatusCode, string(body))
+		return &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	// Some endpoints (e.g. DELETE) may return an empty body.

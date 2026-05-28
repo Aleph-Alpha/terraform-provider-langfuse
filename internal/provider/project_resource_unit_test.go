@@ -453,6 +453,169 @@ func TestProjectResourceImport(t *testing.T) {
 	})
 }
 
+func TestProjectResourceCreateAdoptsExistingOnConflict(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+
+	r, ok := NewProjectResource().(*projectResource)
+	if !ok {
+		t.Fatalf("NewProjectResource did not return a *projectResource as expected")
+	}
+
+	clientFactory := mocks.NewMockClientFactory(ctrl)
+
+	var configureResp resource.ConfigureResponse
+	r.Configure(ctx, resource.ConfigureRequest{ProviderData: clientFactory}, &configureResp)
+	if configureResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics from Configure: %v", configureResp.Diagnostics)
+	}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics from Schema: %v", schemaResp.Diagnostics)
+	}
+
+	const (
+		name           = "ChatQA"
+		existingID     = "proj-existing-123"
+		organizationID = "org-123"
+		publicKey      = "pk-1234"
+		privateKey     = "sk-1234"
+	)
+	desiredMetadata := map[string]string{"environment": "production"}
+	createReq := &langfuse.CreateProjectRequest{
+		Name:          name,
+		RetentionDays: 30,
+		Metadata:      desiredMetadata,
+	}
+
+	gomock.InOrder(
+		clientFactory.OrganizationClient.EXPECT().CreateProject(ctx, createReq).Return(nil, &langfuse.APIError{
+			StatusCode: 409,
+			Body:       `{"message":"A project with this name already exists in your organization"}`,
+		}),
+		clientFactory.OrganizationClient.EXPECT().ListProjects(ctx).Return([]*langfuse.Project{
+			{ID: "proj-other", Name: "Other"},
+			{ID: existingID, Name: name, Metadata: map[string]string{"environment": "stale"}},
+		}, nil),
+		clientFactory.OrganizationClient.EXPECT().UpdateProject(ctx, existingID, &langfuse.UpdateProjectRequest{
+			Name:          name,
+			RetentionDays: 30,
+			Metadata:      desiredMetadata,
+		}).Return(&langfuse.Project{
+			ID:            existingID,
+			Name:          name,
+			RetentionDays: 30,
+			Metadata:      desiredMetadata,
+		}, nil),
+	)
+
+	metadataValue := tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{
+		"environment": tftypes.NewValue(tftypes.String, "production"),
+	})
+
+	createConfig := tfsdk.Config{
+		Raw: buildProjectObjectValue(map[string]tftypes.Value{
+			"id":                       tftypes.NewValue(tftypes.String, nil),
+			"name":                     tftypes.NewValue(tftypes.String, name),
+			"retention_days":           tftypes.NewValue(tftypes.Number, big.NewFloat(30)),
+			"metadata":                 metadataValue,
+			"organization_id":          tftypes.NewValue(tftypes.String, organizationID),
+			"organization_public_key":  tftypes.NewValue(tftypes.String, publicKey),
+			"organization_private_key": tftypes.NewValue(tftypes.String, privateKey),
+			"ignore_destroy":           tftypes.NewValue(tftypes.Bool, nil),
+		}),
+		Schema: schemaResp.Schema,
+	}
+
+	var createResp resource.CreateResponse
+	createResp.State.Schema = schemaResp.Schema
+	r.Create(ctx, resource.CreateRequest{Config: createConfig}, &createResp)
+	if createResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics from Create: %v", createResp.Diagnostics)
+	}
+
+	var stateData projectResourceModel
+	createResp.State.Get(ctx, &stateData)
+
+	if stateData.ID.ValueString() != existingID {
+		t.Errorf("expected adopted project ID %q, got %q", existingID, stateData.ID.ValueString())
+	}
+	if stateData.Name.ValueString() != name {
+		t.Errorf("expected name %q, got %q", name, stateData.Name.ValueString())
+	}
+	if stateData.RetentionDays.ValueInt32() != 30 {
+		t.Errorf("expected retention_days 30, got %d", stateData.RetentionDays.ValueInt32())
+	}
+}
+
+func TestProjectResourceCreateConflictWithoutMatchFails(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+
+	r, ok := NewProjectResource().(*projectResource)
+	if !ok {
+		t.Fatalf("NewProjectResource did not return a *projectResource as expected")
+	}
+
+	clientFactory := mocks.NewMockClientFactory(ctrl)
+
+	var configureResp resource.ConfigureResponse
+	r.Configure(ctx, resource.ConfigureRequest{ProviderData: clientFactory}, &configureResp)
+	if configureResp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diagnostics from Configure: %v", configureResp.Diagnostics)
+	}
+
+	var schemaResp resource.SchemaResponse
+	r.Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+
+	createReq := &langfuse.CreateProjectRequest{
+		Name:          "ChatQA",
+		RetentionDays: 0,
+		Metadata:      map[string]string{},
+	}
+	gomock.InOrder(
+		clientFactory.OrganizationClient.EXPECT().CreateProject(ctx, createReq).Return(nil, &langfuse.APIError{
+			StatusCode: 409,
+			Body:       `{"message":"A project with this name already exists in your organization"}`,
+		}),
+		clientFactory.OrganizationClient.EXPECT().ListProjects(ctx).Return([]*langfuse.Project{
+			{ID: "proj-other", Name: "SomethingElse"},
+		}, nil),
+	)
+
+	emptyMetadata := tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{})
+	createConfig := tfsdk.Config{
+		Raw: buildProjectObjectValue(map[string]tftypes.Value{
+			"id":                       tftypes.NewValue(tftypes.String, nil),
+			"name":                     tftypes.NewValue(tftypes.String, "ChatQA"),
+			"retention_days":           tftypes.NewValue(tftypes.Number, big.NewFloat(0)),
+			"metadata":                 emptyMetadata,
+			"organization_id":          tftypes.NewValue(tftypes.String, "org-123"),
+			"organization_public_key":  tftypes.NewValue(tftypes.String, "pk-1234"),
+			"organization_private_key": tftypes.NewValue(tftypes.String, "sk-1234"),
+			"ignore_destroy":           tftypes.NewValue(tftypes.Bool, nil),
+		}),
+		Schema: schemaResp.Schema,
+	}
+
+	var createResp resource.CreateResponse
+	createResp.State.Schema = schemaResp.Schema
+	r.Create(ctx, resource.CreateRequest{Config: createConfig}, &createResp)
+	if !createResp.Diagnostics.HasError() {
+		t.Fatal("expected diagnostics error when conflict cannot be reconciled with a matching project")
+	}
+}
+
 func buildProjectObjectValue(values map[string]tftypes.Value) tftypes.Value {
 	return tftypes.NewValue(
 		tftypes.Object{
